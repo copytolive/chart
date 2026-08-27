@@ -1,9 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { AuthProvider } from "@/lib/auth/provider";
-import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
-
-const APP_NAME = "Chart";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -11,7 +7,11 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "BTCUSD Chart — CopyToLive" },
-      { name: "description", content: "Professional BTCUSD candlestick charts with live Binance data, indicators, drawings, and paper trading." },
+      {
+        name: "description",
+        content:
+          "Professional BTCUSD candlestick charts with live market data, indicators, drawings, and paper trading.",
+      },
       { name: "theme-color", content: "#131722" },
     ],
     links: [
@@ -23,8 +23,6 @@ export const Route = createRootRoute({
         href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&display=swap",
       },
       { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
-      { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
     ],
   }),
   component: () => (
@@ -33,10 +31,7 @@ export const Route = createRootRoute({
         <HeadContent />
       </head>
       <body>
-        <PreviewHostBridge />
-        <AuthProvider>
-          <Outlet />
-        </AuthProvider>
+        <Outlet />
         <Scripts />
       </body>
     </html>

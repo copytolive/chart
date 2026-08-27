@@ -2,9 +2,26 @@
 
 Public TradingView-inspired market terminal for [copytolive/chart](https://github.com/copytolive/chart).
 
-Live **BTCUSD** candlesticks (and other crypto pairs) from public Binance / OKX market data, in a dark TradingView-like workspace: drawings, indicators, watchlist, alerts, compare, bar replay, and paper trading.
+Live **BTCUSD** candlesticks (and other crypto pairs) from public Binance Vision / OKX market data, in a dark TradingView-like workspace: drawings, indicators, watchlist, alerts, compare, bar replay, and paper trading.
 
 This is **not** affiliated with TradingView. The charting engine is [Lightweight Charts](https://www.tradingview.com/lightweight-charts/) (Apache-2.0). Not financial advice; paper trades never hit an exchange.
+
+## Run locally
+
+```bash
+git clone https://github.com/copytolive/chart.git
+cd chart
+npm install
+npm run dev
+```
+
+Then open [http://localhost:5173](http://localhost:5173). Node 22+.
+
+```bash
+npm run build     # production build
+npm run preview   # serve the build
+npm run typecheck
+```
 
 ## Features
 
@@ -31,3 +48,7 @@ Klines and 24h tickers are fetched server-side from `data-api.binance.vision`, w
 ## Stack
 
 React 19, TanStack Start, Tailwind v4, Zustand, Lightweight Charts v5.
+
+## License
+
+MIT. TradingView is a trademark of TradingView, Inc. This project is an independent look-alike UI built on the open-source Lightweight Charts library.

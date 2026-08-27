@@ -5,5 +5,4 @@ node_modules
 dist
 *.local
 .env
-screenshots
-artifacts
+.DS_Store
