@@ -1,133 +1,19 @@
-(() => {
-  const state = {
-    candles: [], visible: 128, offset: 0, hover: null, dragging: false, dragX: 0,
-    activeTool: 'cross', magnet: false, locked: false, hiddenDrawings: false, replay: false,
-  };
-  const $ = (s, root=document) => root.querySelector(s);
-  const $$ = (s, root=document) => [...root.querySelectorAll(s)];
-  const canvas = $('#chartCanvas');
-  const wrap = $('#chartWrap');
-  const ctx = canvas.getContext('2d');
-  const fmt = n => n.toLocaleString('id-ID', {maximumFractionDigits:0});
-  const fmt1 = n => n.toLocaleString('id-ID', {maximumFractionDigits:1});
-
-  function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296}}
-  function generateCandles(){
-    const rng=mulberry32(20260512), out=[]; let p=101000; const start=new Date('2025-11-05T00:00:00Z');
-    const anchors=[101000,93000,87500,90500,87000,89000,96000,88500,67500,66500,73500,69000,66500,73500,78500,81850];
-    const total=190;
-    for(let i=0;i<total;i++){
-      const t=i/(total-1)*(anchors.length-1), a=Math.floor(t), f=t-a;
-      const target=(anchors[a]??anchors.at(-1))*(1-f)+(anchors[Math.min(a+1,anchors.length-1)]??anchors.at(-1))*f;
-      const noise=(rng()-.5)*3600 + Math.sin(i*.63)*1100;
-      const close=target+noise*0.45;
-      const open=i?out[i-1].close+(rng()-.5)*1700:p;
-      const high=Math.max(open,close)+450+rng()*1900;
-      const low=Math.min(open,close)-450-rng()*1900;
-      let vol=380+rng()*780;
-      if(i>84&&i<124) vol*=1.65;
-      if(i===88||i===91) vol*=2.2;
-      const d=new Date(start.getTime()+i*86400000);
-      out.push({time:d,open,high,low,close,volume:vol});
-      p=close;
-    }
-    // Force last values close to visual reference.
-    const last=out[out.length-1]; Object.assign(last,{open:82197,high:82361,low:80429,close:81847,volume:1030});
-    return out;
-  }
-  state.candles=generateCandles();
-
-  function resize(){
-    const r=wrap.getBoundingClientRect(), dpr=Math.max(1,Math.min(devicePixelRatio||1,2));
-    canvas.width=Math.floor(r.width*dpr); canvas.height=Math.floor(r.height*dpr);
-    canvas.style.width=r.width+'px'; canvas.style.height=r.height+'px';
-    ctx.setTransform(dpr,0,0,dpr,0,0); draw();
-  }
-
-  function dataSlice(){
-    const end=Math.max(state.visible, state.candles.length-state.offset);
-    const start=Math.max(0,end-state.visible); return {data:state.candles.slice(start,end),start,end};
-  }
-  function niceStep(range,target=10){const rough=range/target,pow=10**Math.floor(Math.log10(rough)),n=rough/pow;return (n<1.5?1:n<3?2.5:n<7?5:10)*pow}
-  function draw(){
-    const w=wrap.clientWidth,h=wrap.clientHeight; if(w<10||h<10)return;
-    ctx.clearRect(0,0,w,h); ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);
-    const right=68, left=0, top=0, bottom=29, volumeH=Math.min(150,h*.18), priceBottom=h-bottom;
-    const {data,start}=dataSlice(); if(!data.length)return;
-    const min=Math.min(...data.map(d=>d.low)),max=Math.max(...data.map(d=>d.high));
-    const pad=(max-min)*.07, pmin=min-pad,pmax=max+pad;
-    const y=p=>top+(pmax-p)/(pmax-pmin)*(priceBottom-top);
-    const x=i=>left+(i+.5)/(data.length)*(w-right-left);
-    // grid
-    ctx.strokeStyle='#eeeeee';ctx.lineWidth=1;
-    const step=niceStep(pmax-pmin,11), first=Math.ceil(pmin/step)*step;
-    ctx.font='12px -apple-system,BlinkMacSystemFont,Segoe UI,Arial';ctx.textBaseline='middle';
-    for(let p=first;p<=pmax;p+=step){const yy=y(p);ctx.beginPath();ctx.moveTo(left,yy+.5);ctx.lineTo(w-right,yy+.5);ctx.stroke();ctx.fillStyle='#333';ctx.fillText(fmt(p),w-right+9,yy)}
-    const monthMarks=[];let lastM=-1;
-    data.forEach((d,i)=>{const m=d.time.getUTCMonth(); if(m!==lastM){monthMarks.push([i,d.time]);lastM=m}});
-    monthMarks.forEach(([i,d])=>{const xx=x(i);ctx.beginPath();ctx.moveTo(xx+.5,top);ctx.lineTo(xx+.5,priceBottom);ctx.stroke();ctx.fillStyle='#333';const mon=d.toLocaleString('id-ID',{month:'short',timeZone:'UTC'});ctx.fillText(d.getUTCMonth()===0?String(d.getUTCFullYear()):mon,xx-10,h-15)});
-    // candles & volume
-    const cw=Math.max(2,Math.min(8,(w-right)/data.length*.62)); const vmax=Math.max(...data.map(d=>d.volume))*1.15;
-    data.forEach((d,i)=>{const xx=x(i), up=d.close>=d.open, c=up?'#089981':'#f23645';ctx.strokeStyle=c;ctx.fillStyle=c;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(Math.round(xx)+.5,y(d.high));ctx.lineTo(Math.round(xx)+.5,y(d.low));ctx.stroke();const yo=y(d.open),yc=y(d.close),bh=Math.max(1,Math.abs(yc-yo));ctx.fillRect(xx-cw/2,Math.min(yo,yc),cw,bh);ctx.globalAlpha=.47;const vh=d.volume/vmax*volumeH;ctx.fillRect(xx-cw/2,priceBottom-vh,cw,vh);ctx.globalAlpha=1});
-    // current price line
-    const last=data[data.length-1], ly=y(last.close);ctx.save();ctx.strokeStyle='#f23645';ctx.setLineDash([2,2]);ctx.beginPath();ctx.moveTo(left,ly+.5);ctx.lineTo(w-right,ly+.5);ctx.stroke();ctx.restore();ctx.fillStyle='#f23645';ctx.fillRect(w-right,ly-18,68,36);ctx.fillStyle='#fff';ctx.font='12px -apple-system,BlinkMacSystemFont,Segoe UI,Arial';ctx.fillText(fmt(last.close),w-right+7,ly-7);ctx.fillText('03:26:55',w-right+7,ly+8);
-    // right divider
-    ctx.strokeStyle='#e8e8e8';ctx.beginPath();ctx.moveTo(w-right+.5,0);ctx.lineTo(w-right+.5,h);ctx.stroke();
-    // crosshair
-    if(state.hover){const mx=state.hover.x,my=state.hover.y;ctx.save();ctx.strokeStyle='#9aa0a6';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(mx,0);ctx.lineTo(mx,priceBottom);ctx.moveTo(0,my);ctx.lineTo(w-right,my);ctx.stroke();ctx.restore();const price=pmax-(my-top)/(priceBottom-top)*(pmax-pmin);ctx.fillStyle='#666';ctx.fillRect(w-right,my-10,68,20);ctx.fillStyle='#fff';ctx.fillText(fmt(price),w-right+7,my);const idx=Math.max(0,Math.min(data.length-1,Math.floor(mx/(w-right)*data.length)));const d=data[idx];if(d){updateLegend(d);ctx.fillStyle='#666';ctx.fillRect(Math.max(0,mx-42),h-bottom,84,bottom);ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText(d.time.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'2-digit'}),mx,h-15);ctx.textAlign='left'}} else updateLegend(state.candles.at(-1));
-  }
-
-  function updateLegend(d){
-    if(!d)return; const delta=d.close-d.open,pct=delta/d.open*100,sg=delta>=0?'+':'−';
-    $('#ohlc').textContent=`O${fmt(d.open)} H${fmt(d.high)} L${fmt(d.low)} C${fmt(d.close)} ${sg}${fmt(Math.abs(delta))} (${sg}${Math.abs(pct).toFixed(2).replace('.',',')}%)`;
-    $('#ohlc').style.color=delta>=0?'#089981':'#f23645'; $('#sellPrice').textContent=fmt(d.close+6);$('#buyPrice').textContent=fmt(d.close+7);$('#volLabel').textContent=fmt1(d.volume/1000)+'K';
-    $('#watchLast').textContent=fmt(d.close);$('#assetPrice').textContent=fmt(d.close);$('#statVolume').textContent=fmt1(d.volume/1000)+'K';
-  }
-
-  canvas.addEventListener('mousemove',e=>{const r=canvas.getBoundingClientRect();state.hover={x:e.clientX-r.left,y:e.clientY-r.top}; if(state.dragging){const dx=e.clientX-state.dragX;if(Math.abs(dx)>7){state.offset=Math.max(0,Math.min(state.candles.length-state.visible,state.offset+Math.sign(-dx)*2));state.dragX=e.clientX}} draw()});
-  canvas.addEventListener('mouseleave',()=>{state.hover=null;state.dragging=false;draw()});
-  canvas.addEventListener('mousedown',e=>{state.dragging=true;state.dragX=e.clientX});window.addEventListener('mouseup',()=>state.dragging=false);
-  canvas.addEventListener('wheel',e=>{e.preventDefault();state.visible=Math.max(35,Math.min(state.candles.length,state.visible+Math.sign(e.deltaY)*10));state.offset=Math.min(state.offset,state.candles.length-state.visible);draw()},{passive:false});
-
-  function showToast(text){const t=$('#toast');t.textContent=text;t.classList.remove('hidden');clearTimeout(showToast._id);showToast._id=setTimeout(()=>t.classList.add('hidden'),1600)}
-  function closeModal(){const root=$('#modalRoot');root.innerHTML=''}
-  function modalShell(title,body,{compact=false,wide=false,footer=true}={}){
-    $('#modalRoot').innerHTML=`<div class="modal-backdrop"><div class="modal ${compact?'compact':''} ${wide?'wide':''}"><div class="modal-title"><span>${title}</span><button class="modal-close" data-close>×</button></div><div class="modal-body">${body}</div>${footer?'<div class="modal-footer"><button class="btn" data-close>Batal</button><button class="btn primary" data-close>Ok</button></div>':''}</div></div>`;
-    $$('[data-close]').forEach(b=>b.addEventListener('click',closeModal));$('.modal-backdrop').addEventListener('mousedown',e=>{if(e.target===e.currentTarget)closeModal()});
-  }
-  const symbolBody=`<input class="search-input" autofocus value="BTCUSD" aria-label="Cari simbol"><div class="symbol-list"><div class="symbol-item"><i>₿</i><div><strong>BTCUSD</strong><div class="hint" style="text-align:left;margin:2px 0">Bitcoin / Dollar AS · BITSTAMP</div></div><span>Crypto</span></div><div class="symbol-item"><i style="background:#627eea">Ξ</i><div><strong>ETHUSD</strong><div class="hint" style="text-align:left;margin:2px 0">Ethereum / Dollar AS</div></div><span>Crypto</span></div><div class="symbol-item"><i style="background:#d7a900">●</i><div><strong>GOLD</strong><div class="hint" style="text-align:left;margin:2px 0">Gold Spot</div></div><span>Futures</span></div></div>`;
-  function openModal(name){
-    if(name==='symbol'||name==='search') modalShell(name==='search'?'Pencarian cepat':'Pencarian simbol',symbolBody,{wide:true,footer:false});
-    else if(name==='interval') modalShell('Ubah interval','<input class="interval-input" value="D" autofocus><div class="hint">1 hari</div>',{compact:true,footer:false});
-    else if(name==='charttype') modalShell('Tipe chart','<div class="symbol-list"><div class="symbol-item">▥ <strong>Candle</strong></div><div class="symbol-item">│ <strong>Bar</strong></div><div class="symbol-item">╲ <strong>Garis</strong></div><div class="symbol-item">▰ <strong>Area</strong></div><div class="symbol-item">◇ <strong>Heikin Ashi</strong></div></div>',{compact:true,footer:false});
-    else if(name==='indicator') modalShell('Indikator, metrik dan strategi','<input class="search-input" placeholder="Cari indikator"><div class="symbol-list"><div class="symbol-item"><span>MA</span><strong>Moving Average</strong><span>Teknikal</span></div><div class="symbol-item"><span>RSI</span><strong>Relative Strength Index</strong><span>Teknikal</span></div><div class="symbol-item"><span>MACD</span><strong>MACD</strong><span>Teknikal</span></div></div>',{wide:true,footer:false});
-    else if(name==='alert') modalShell('Buat peringatan','<label>BTCUSD<br><select class="search-input" style="height:40px;margin-top:7px"><option>Melewati</option><option>Lebih besar dari</option><option>Lebih kecil dari</option></select></label><div class="setting-row"><label>Nilai</label><input class="interval-input" style="height:38px" value="82.000"></div>',{compact:false});
-    else if(name==='settings') modalShell('Pengaturan',`<div class="settings-grid"><div class="settings-nav"><button class="active">⌇ Simbol</button><button>☰ Baris status</button><button>⌖ Skala dan garis</button><button>◇ Canvas</button><button>⌁ Trading</button><button>◴ Peringatan</button><button>▣ Peristiwa</button></div><div class="settings-content"><small style="color:#777">CANDLE</small><div class="setting-row"><input type="checkbox"> Warnai bar berdasarkan penutupan sebelumnya</div><div class="setting-row"><input type="checkbox" checked> <label>Badan</label><span class="swatch"><span style="background:#089981"></span></span><span class="swatch"><span style="background:#f23645"></span></span></div><div class="setting-row"><input type="checkbox" checked> <label>Batas-Batas</label><span class="swatch"><span style="background:#089981"></span></span><span class="swatch"><span style="background:#f23645"></span></span></div><div class="setting-row"><input type="checkbox" checked> <label>Sumbu</label><span class="swatch"><span style="background:#089981"></span></span><span class="swatch"><span style="background:#f23645"></span></span></div><small style="color:#777">MODIFIKASI DATA</small><div class="setting-row"><label>Presisi</label><select class="btn"><option>Bawaan</option></select></div><div class="setting-row"><label>Zona waktu</label><select class="btn"><option>(UTC+7) Bangkok</option></select></div></div></div>`,{wide:true});
-    else if(name==='layout') modalShell('Setup layout','<div class="symbol-list"><div class="symbol-item">▣ <strong>1 chart</strong></div><div class="symbol-item">▦ <strong>2 chart</strong></div><div class="symbol-item">▦ <strong>4 chart</strong></div></div>',{compact:true,footer:false});
-    else if(name==='publish') modalShell('Publikasikan ide','<p>Bagikan snapshot chart dan catatan analisis Anda.</p><textarea class="search-input" style="height:120px;padding-top:10px" placeholder="Tulis ide..."></textarea>',{wide:true});
-    else if(name==='date') modalShell('Ke tanggal','<input class="search-input" type="date" value="2026-05-12">',{compact:true});
-  }
-
-  $$('[data-modal]').forEach(b=>b.addEventListener('click',()=>openModal(b.dataset.modal)));
-  $$('[data-tool]').forEach(b=>b.addEventListener('click',()=>{ $$('.rail-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.activeTool=b.dataset.tool;showToast('Peralatan: '+b.title)}));
-  $$('[data-range]').forEach(b=>b.addEventListener('click',()=>{ $$('.rangebar [data-range]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const map={D:128,'1D':45,'5H':60,'1M':75,'3M':100,'6M':128,YTD:150,'1Y':170,'5Y':185,ALL:190};state.visible=Math.min(state.candles.length,map[b.dataset.range]||128);state.offset=0;draw()}));
-  $$('[data-action]').forEach(b=>b.addEventListener('click',()=>{
-    const a=b.dataset.action;
-    if(a==='toast')showToast(b.dataset.toast||'Siap');
-    if(a==='save'){localStorage.setItem('copytolive-chart-layout',JSON.stringify({visible:state.visible,offset:state.offset}));showToast('Layout disimpan')}
-    if(a==='fullscreen'){if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.()}
-    if(a==='snapshot'){const url=canvas.toDataURL('image/png');const link=document.createElement('a');link.href=url;link.download='copytolive-btcusd-chart.png';link.click();showToast('Cuplikan chart diunduh')}
-    if(a==='trade')$('#tradePanel').classList.toggle('hidden');
-    if(a==='toggleWatch')$('#watchlist').classList.toggle('collapsed');
-    if(a==='magnet'){state.magnet=!state.magnet;b.classList.toggle('active',state.magnet);showToast('Magnet '+(state.magnet?'aktif':'nonaktif'))}
-    if(a==='lock'||a==='lockall'){state.locked=!state.locked;b.classList.toggle('active',state.locked);showToast('Gambar '+(state.locked?'dikunci':'dibuka'))}
-    if(a==='hide'){state.hiddenDrawings=!state.hiddenDrawings;b.classList.toggle('active',state.hiddenDrawings);showToast('Gambar '+(state.hiddenDrawings?'disembunyikan':'ditampilkan'))}
-    if(a==='clear')showToast('Semua gambar dihapus');
-    if(a==='zoom'){state.visible=Math.max(35,state.visible-15);draw()}
-    if(a==='replay'){state.replay=!state.replay;if(state.replay){state.visible=75;state.offset=state.candles.length-105;showToast('Putar ulang bar aktif');const id=setInterval(()=>{if(!state.replay){clearInterval(id);return}state.offset=Math.max(0,state.offset-1);draw();if(state.offset===0){state.replay=false;clearInterval(id);showToast('Putar ulang selesai')}},300)}else showToast('Putar ulang dijeda')}
-  }));
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if(e.key==='/'||((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k')){e.preventDefault();openModal('search')}});
-  const saved=localStorage.getItem('copytolive-chart-layout');if(saved){try{Object.assign(state,JSON.parse(saved))}catch{}}
-  setInterval(()=>{$('#clock').textContent=new Intl.DateTimeFormat('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Jakarta'}).format(new Date())+' UTC+7'},1000);
-  new ResizeObserver(resize).observe(wrap);resize();
-})();
+const c=document.getElementById('screen');
+const x=c.getContext('2d');
+const W=2048,H=1210;
+const C={bg:'#0f0f0f',grid:'#1c1c1c',line:'#2e2e2e',muted:'#9b9b9b',text:'#d7d7d7',bright:'#f1f1f1',green:'#079a81',red:'#f33645',blue:'#2962ff',purple:'#2f2740',chip:'#181818'};
+function rect(a,b,w,h,fill,stroke=null,r=0){x.beginPath();if(r){x.roundRect(a,b,w,h,r)}else{x.rect(a,b,w,h)};x.fillStyle=fill;x.fill();if(stroke){x.strokeStyle=stroke;x.lineWidth=1;x.stroke()}}
+function line(x1,y1,x2,y2,col=C.line,w=1,dash=[]){x.beginPath();x.setLineDash(dash);x.moveTo(x1+.5,y1+.5);x.lineTo(x2+.5,y2+.5);x.strokeStyle=col;x.lineWidth=w;x.stroke();x.setLineDash([])}
+function txt(t,a,b,size=14,col=C.text,align='left',weight='400'){x.font=`${weight} ${size}px Arial,Helvetica,sans-serif`;x.fillStyle=col;x.textAlign=align;x.textBaseline='middle';x.fillText(t,a,b)}
+function circle(a,b,r,fill,stroke=null,w=1){x.beginPath();x.arc(a,b,r,0,Math.PI*2);x.fillStyle=fill;x.fill();if(stroke){x.strokeStyle=stroke;x.lineWidth=w;x.stroke()}}
+function topIcon(cx,cy,kind){x.save();x.strokeStyle='#b7b7b7';x.fillStyle='#b7b7b7';x.lineWidth=1.5;switch(kind){case 'plus':circle(cx,cy,10,'transparent','#a8a8a8',1);line(cx-4,cy,cx+4,cy,'#b7b7b7',1.4);line(cx,cy-4,cx,cy+4,'#b7b7b7',1.4);break;case 'undo':x.beginPath();x.arc(cx+2,cy+1,7,3.5,5.4);x.stroke();line(cx-7,cy-2,cx-2,cy-7,'#777');line(cx-7,cy-2,cx-1,cy,'#777');break;case 'redo':x.beginPath();x.arc(cx-2,cy+1,7,-2.2,-.3);x.stroke();line(cx+7,cy-2,cx+2,cy-7,'#777');line(cx+7,cy-2,cx+1,cy,'#777');break;case 'camera':rect(cx-9,cy-6,18,12,'transparent','#b7b7b7',2);circle(cx,cy,4,'transparent','#b7b7b7');rect(cx-4,cy-9,8,3,'#b7b7b7');break;case 'fullscreen':line(cx-8,cy-8,cx-3,cy-8);line(cx-8,cy-8,cx-8,cy-3);line(cx+8,cy-8,cx+3,cy-8);line(cx+8,cy-8,cx+8,cy-3);line(cx-8,cy+8,cx-3,cy+8);line(cx-8,cy+8,cx-8,cy+3);line(cx+8,cy+8,cx+3,cy+8);line(cx+8,cy+8,cx+8,cy+3);break;case 'hex':x.beginPath();for(let i=0;i<6;i++){let a=-Math.PI/2+i*Math.PI/3;let px=cx+9*Math.cos(a),py=cy+9*Math.sin(a);i?x.lineTo(px,py):x.moveTo(px,py)}x.closePath();x.stroke();circle(cx,cy,2,'#b7b7b7');break;case 'flame':x.beginPath();x.moveTo(cx,cy-9);x.bezierCurveTo(cx+7,cy-2,cx+7,cy+5,cx,cy+9);x.bezierCurveTo(cx-7,cy+4,cx-6,cy-2,cx-1,cy-6);x.stroke();break;}x.restore()}
+function drawTop(){rect(0,0,W,45,C.bg);line(0,45,W,45,C.line);circle(29,22,12,'#6a3e8c');circle(36,13,10,'#b51f4d');txt('11',36,13,10,'white','center','700');txt('C',28,22,15,'white','center','700');rect(65,7,149,31,'#242424','#4a4a4a',16);txt('XAUUSD',82,23,14,'#ddd','left','700');circle(194,23,10,'transparent','#777');txt('◆',194,23,9,'#bbb','center');topIcon(239,23,'plus');txt('D',295,23,14,'#d6d6d6','center');line(271,8,271,37,'#2d2d2d');line(321,8,321,37,'#2d2d2d');line(345,29,345,17,'#b7b7b7');line(353,25,353,13,'#b7b7b7');line(361,21,361,9,'#b7b7b7');line(369,31,369,19,'#b7b7b7');line(394,29,400,19,'#b7b7b7');line(400,19,407,25,'#b7b7b7');line(407,25,414,10,'#b7b7b7');txt('Indicators',424,23,14,'#d8d8d8');for(let yy=16;yy<=26;yy+=10)for(let xx=533;xx<=543;xx+=10)rect(xx,yy,6,6,'transparent','#aaa',1);circle(587,23,9,'transparent','#aaa');line(587,13,587,8,'#aaa');line(587,23,592,23,'#aaa');txt('Alert',608,23,14);txt('◁',675,23,17,'#aaa','center');txt('Replay',697,23,14);line(755,8,755,37,'#2d2d2d');topIcon(797,23,'undo');topIcon(839,23,'redo');rect(1562,12,22,22,'transparent','#a8a8a8',2);txt('Tanpa Nama',1601,23,14,'#d8d8d8');txt('⌄',1736,23,15,'#999');line(1753,8,1753,37,'#2d2d2d');topIcon(1781,23,'flame');topIcon(1825,23,'hex');topIcon(1869,23,'fullscreen');topIcon(1913,23,'camera');rect(1934,8,74,30,'transparent','#666',16);txt('Trade',1971,23,14,'#ddd','center');rect(2013,8,50,30,'#efefef',null,16);txt('Pu',2038,23,14,'#111','center','700');}
+function drawLeft(){rect(0,46,61,1119,C.bg);line(60,46,60,1165,C.line);const ys=[72,114,156,198,240,282,324,366,408,450,492,534,576,618,660,702,744];const labels=['⌖','╱','≡','◇','⌁','⌒','T','☺','⌁','⌕','∩','♙','▣','◉','','','♜'];ys.forEach((yy,i)=>{if(i===0)rect(8,58,44,31,'#252525',null,4);if(labels[i])txt(labels[i],30,yy,22,i===0?'#ddd':'#b8b8b8','center')});line(9,383,51,383,'#242424');line(9,618,51,618,'#242424');txt('⌄',28,1058,17,'#999','center');txt('⌫',29,1119,20,'#aaa','center')}
+const grect=[[523,159,23,49],[501,208,22,49],[775,208,22,49],[752,257,22,50],[478,257,22,50],[455,307,22,49],[729,307,22,49],[706,356,22,49],[432,356,22,49],[409,405,22,49],[683,405,23,49],[1025,454,23,49],[386,454,23,49],[363,503,23,49],[1003,503,22,49],[1345,552,23,49],[980,552,22,49],[341,552,22,49],[318,601,22,50],[1322,601,23,50],[1300,651,22,49],[295,651,22,49],[1277,700,22,49],[272,700,22,49],[181,700,23,49],[1185,700,23,49],[158,749,23,49],[1254,749,22,49],[249,749,23,49],[136,798,22,49],[113,847,22,50],[90,897,22,49],[67,946,22,49]];
+const rrect=[[546,208,23,49],[569,257,22,50],[798,257,22,50],[820,307,23,49],[592,307,22,49],[843,356,23,49],[615,356,22,49],[866,405,22,49],[638,405,22,49],[889,454,22,49],[661,454,22,49],[1048,503,23,48],[911,503,22,48],[1071,553,22,48],[934,553,22,48],[957,601,22,50],[1094,601,22,50],[1117,651,22,49],[1140,700,22,49],[204,749,22,49],[1208,749,23,49],[1163,749,22,49],[226,798,23,49],[1231,798,22,49]];
+function drawChart(){const x0=61,x1=1693,y0=46,y1=1165;rect(x0,y0,x1-x0,y1-y0,C.bg);for(let yy=61;yy<=1110;yy+=49.5)line(x0,Math.round(yy),1596,Math.round(yy),C.grid,1);for(let xx=181;xx<=1595;xx+=113.5)line(Math.round(xx),y0,Math.round(xx),1154,C.grid,1);circle(84,68,9,'#f7b500');txt('⌁',84,68,12,'#fff','center','700');txt('Gold Spot / U.S. Dollar · 1D · OANDA · Renko [ATR(14), 100]',99,68,15,'#d8d8d8');rect(622,60,18,17,'#133b36',null,4);txt('●',631,68,8,C.green,'center');rect(642,60,18,17,'#3b1a31',null,4);txt('≈',651,68,11,'#f05b8e','center','700');txt('O4,500.000  H4,600.000  L4,500.000  C4,600.000  +100.000 (+2.22%)',669,68,14,C.green);rect(75,86,99,42,'transparent',C.red,5);txt('4,448.310',124,101,14,C.red,'center','700');txt('SELL',124,117,12,C.red,'center','700');txt('68.0',196,106,11,'#a8a8a8','center');rect(220,86,99,42,'transparent',C.blue,5);txt('4,448.990',269,101,14,'#4f82ff','center','700');txt('BUY',269,117,12,'#4f82ff','center','700');line(67,945,67,1045,C.green,1);line(214,673,214,847,C.red,1);line(259,742,259,880,C.green,1);line(341,387,341,686,C.green,1);line(478,248,478,404,C.green,1);line(501,159,501,257,C.green,1);line(729,346,729,463,C.green,1);line(752,257,752,405,C.green,1);line(798,257,798,455,C.red,1);line(843,345,843,553,C.red,1);line(1025,438,1025,552,C.green,1);line(1048,503,1048,600,C.red,1);line(1093,454,1093,552,C.red,1);line(1185,697,1185,798,C.green,1);line(1208,687,1208,848,C.red,1);line(1231,749,1231,849,C.red,1);line(1254,748,1254,859,C.green,1);grect.forEach(v=>rect(...v,C.green));rrect.forEach(v=>rect(...v,C.red));line(61,550,1596,550,'#156d64',1,[2,2]);rect(1597,536,86,27,C.green,null,3);txt('4,600.000',1640,550,14,'#dff7f1','center');rect(1597,596,86,27,'#5c2630',null,3);txt('4,448.560',1640,610,14,'#fff','center');let prices=[5600,5500,5400,5300,5200,5100,5000,4900,4800,4700,4600,4500,4400,4300,4200,4100,4000,3900,3800,3700,3600,3500];let yy=61;prices.forEach(p=>{txt(p.toLocaleString('en-US')+'.000',1682,yy,13,'#bdbdbd','right');yy+=49.5});const xl=[['Oct',99],['15',166],['Nov',267],['2026',351],['22',421],['28',489],['30',558],['Feb',650],['9',718],['Mar',786],['19',875],['20',948],['Apr',1016],['May',1084],['10',1149],['Aug',1268],['19',1335],['Sep',1402],['4',1468],['9',1532]];xl.forEach(([t,xx])=>txt(t,xx,1146,13,'#a9a9a9','center'));x.save();x.fillStyle='#e6e6e6';x.beginPath();x.moveTo(78,1097);x.lineTo(89,1097);x.lineTo(94,1109);x.lineTo(101,1097);x.lineTo(114,1097);x.lineTo(101,1116);x.lineTo(91,1116);x.closePath();x.fill();x.restore();txt('TradingView',119,1108,22,'#e6e6e6','left','700');for(const [xx,lab] of [[1355,'🇺🇸'],[1402,'⚡'],[1430,'🇺🇸'],[1474,'🇺🇸'],[1501,'🇺🇸']]){circle(xx,1119,13,'#1a1a1a','#6f6f6f');txt(lab,xx,1119,14,'#fff','center')}circle(1645,1145,8,'transparent','#888');txt('⌁',1645,1145,9,'#888','center');}
+function drawBottom(){rect(61,1165,1632,45,C.bg);line(61,1165,1693,1165,C.line);const items=[['1D',92],['5D',129],['1M',166],['3M',204],['6M',243],['YTD',283],['1Y',326],['5Y',366],['All',405]];items.forEach(([t,xx])=>txt(t,xx,1189,13,'#d0d0d0','center'));txt('⌗',443,1189,18,'#b7b7b7','center');txt('06:42:13 UTC+7',1674,1189,13,'#c7c7c7','right');}
+function drawPanel(){const px=1694;rect(px,46,354,1164,C.bg);line(px,46,px,1210,C.line);txt('Daftar Pantau',1710,80,16,'#d7d7d7','left','700');txt('⌄',1814,80,13,'#999');txt('+',1916,80,24,'#bbb','center');txt('▦',1960,80,18,'#bbb','center');txt('•••',2016,80,16,'#bbb','center');txt('Symbol',1714,124,13,'#8f8f8f');txt('Last',1855,124,13,'#8f8f8f');txt('Chg',1935,124,13,'#8f8f8f');txt('Chg%',2017,124,13,'#8f8f8f','center');line(px,143,W,143,C.line);circle(1718,165,9,'#ae3b48');txt('≋',1718,165,10,'#fff','center');txt('COI',1739,165,15,'#ddd','left','700');txt('6,518.12',1858,165,14,'#d9d9d9');txt('−3.6290',1931,165,14,C.red);txt('−0.06%',2018,165,14,C.red,'center');line(px,188,W,188,C.line);circle(1718,217,13,'#e5ad00');txt('⌁',1718,217,14,'#fff','center','700');txt('XAUUSD',1741,217,16,'#ddd','left','700');txt('▦',1911,217,16,'#aaa','center');txt('✎',1960,217,17,'#aaa','center');txt('•••',2017,217,16,'#aaa','center');txt('Gold Spot / U.S. Dollar ↗ · OANDA',1710,258,13,'#b7b7b7');txt('Commodity · Cfd',1710,284,13,'#8e8e8e');txt('4,448.6',1711,333,34,'#e7e7e7','left','700');txt('35',1842,326,18,C.green,'left','700');txt('USD',1879,338,12,'#b5b5b5');txt('−6.355  −0.14%',1711,367,16,C.red,'left','700');circle(1718,390,4,C.green);txt('Market open',1731,390,13,C.green);rect(1711,416,103,25,'#162f4f',null,4);txt('4,448.310',1762,429,13,'#4d80ff','center');rect(1836,416,91,25,'#3f1d24',null,4);txt('4,448.990',1882,429,13,C.red,'center');line(1711,486,2012,486,'#4a4a4a',6);circle(1839,486,5,'#d7d7d7');circle(1971,486,5,'#d7d7d7');txt('4,445.545',1711,463,13,'#c5c5c5');txt("DAY'S RANGE",1860,463,11,'#8b8b8b','center');txt('4,466.950',2011,463,13,'#c5c5c5','right');line(1711,541,2012,541,'#4a4a4a',6);circle(1858,541,5,'#d7d7d7');txt('3,470.050',1711,518,13,'#c5c5c5');txt('52WK RANGE',1860,518,11,'#8b8b8b','center');txt('5,602.225',2011,518,13,'#c5c5c5','right');rect(1711,574,301,97,C.purple,null,8);txt('News · 2 days ago',1726,595,13,'#b69ce0');txt('CFTC Commitments: Comex Gold',1726,620,13,'#d6d0df');txt('Futures/Options - Aug 28',1726,642,13,'#d6d0df');txt('More events ›',1726,658,11,'#958aa5');line(1711,699,2012,699,C.line);txt('Performance',1711,716,14,'#d2d2d2','left','700');const cards=[[1711,729,85,51,'#3c181d','−3.46%','1W',C.red],[1804,729,85,51,'#173932','8.45%','1M',C.green],[1897,729,85,51,'#3c181d','−0.74%','3M',C.red],[1711,788,85,51,'#3c181d','−12.85%','6M',C.red],[1804,788,85,51,'#173932','2.86%','YTD',C.green],[1897,788,85,51,'#173932','30.23%','1Y',C.green]];cards.forEach(([a,b,w,h,f,v,l,col])=>{rect(a,b,w,h,f,null,4);txt(v,a+w/2,b+18,14,col,'center','700');txt(l,a+w/2,b+38,11,'#bdbdbd','center')});line(1711,860,2012,860,C.line);txt('Seasonals',1711,878,14,'#d2d2d2','left','700');const sx=1712,sy=910,sw=300,sh=130;line(sx,sy+sh,sx+sw,sy+sh,'#777');for(let gx=sx+45;gx<sx+sw;gx+=75)line(gx,sy,gx,sy+sh,'#444',1,[5,7]);const blue=[[sx,1028],[sx+15,1011],[sx+25,996],[sx+38,1030],[sx+52,1041],[sx+68,1049],[sx+83,1038],[sx+100,1054],[sx+121,1050],[sx+139,1032],[sx+156,1015],[sx+171,1032]];const green=[[sx,1028],[sx+20,1008],[sx+40,991],[sx+60,973],[sx+80,968],[sx+100,953],[sx+120,960],[sx+140,945],[sx+160,925],[sx+175,939],[sx+190,904],[sx+205,924],[sx+222,911],[sx+240,892],[sx+260,904],[sx+275,888],[sx+292,895]];const orange=[[sx,1028],[sx+25,1015],[sx+50,1004],[sx+75,1008],[sx+100,999],[sx+125,994],[sx+150,983],[sx+175,975],[sx+200,968],[sx+225,961],[sx+250,971],[sx+275,966],[sx+292,970]];function poly(p,col){x.beginPath();p.forEach((q,i)=>i?x.lineTo(q[0],q[1]):x.moveTo(q[0],q[1]));x.strokeStyle=col;x.lineWidth=2;x.stroke()}poly(blue,'#2962ff');poly(green,'#13b86a');poly(orange,'#f0a500');txt('Jan',1723,1067,12,'#bbb');txt('May',1848,1067,12,'#bbb');txt('Sep',1965,1067,12,'#bbb');circle(1762,1108,5,'#2962ff');txt('2026',1774,1108,12,'#aaa');circle(1842,1108,5,'#13b86a');txt('2025',1854,1108,12,'#aaa');circle(1922,1108,5,'#f0a500');txt('2024',1934,1108,12,'#aaa');rect(1810,1139,140,29,'#292929',null,15);txt('More seasonals',1880,1154,12,'#aaa','center');line(1711,1186,2012,1186,C.line);txt('Technicals',1711,1200,14,'#d2d2d2','left','700');}
+function render(){x.clearRect(0,0,W,H);rect(0,0,W,H,C.bg);drawTop();drawLeft();drawChart();drawBottom();drawPanel();}
+render();
+window.addEventListener('keydown',e=>{if(e.key==='f'||e.key==='F'){document.documentElement.requestFullscreen?.()}});
